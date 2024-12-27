@@ -11,36 +11,52 @@ import os
 
 def lambda_handler(event, context=None):
     fileName = event['fileName']
-    user, location, course, name = fileName.split('/')[2:]
+    user, semester, location, course, name = fileName.split('/')[2:]
     if '.' in name:
-        name = name.split('.')[0] + '.txt'
+        nametxt = name.split('.')[0] + '.txt'
+        namejson = name.split('.')[0] + '.json'
+        name = name.split('.')[0]
 
     #  Get data from the API
-    response = requests.get(f'https://api.sayman.me/{fileName}')
+    response = requests.get(f'https://api.dataextract.sayman.me/{fileName}')
     docs = response.json()
-    #print(docs)
+    print(docs)
     #print(f"{"-"*100}")
+    if not docs:
+        responsult = {
+            "response_type": "no_data",
+            "response_code": "404",
+            "ranked_topics_w_subtopics": [
+                "Nothing"
+            ]
+        }
+        return responsult
 
     # Create a text file and write the data to it
-    with open('/tmp/upload.txt', 'w') as output_file:
+    with open('/tmp/upload.txt', 'w') as txt_file:
         for doc in docs:
             markdown_text = doc['text']
-            output_file.write(markdown_text + '\n\n')
+            txt_file.write(markdown_text + '\n\n')
 
+    # First write the JSON data to a temporary file
+    with open('/tmp/upload.json', 'w') as json_file:
+        json.dump(docs, json_file)
+    
     # Initialize the S3 client
     s3 = boto3.resource('s3',
-        endpoint_url = 'https://48e5d6ac609909a2d247eaadfb424467.r2.cloudflarestorage.com',
-        aws_access_key_id = '7cff1f1539cb0eae6af01d0f94e2d161',
-        aws_secret_access_key = '6ca98c5d5bdf1fcac3b4321ecec87f4acfcce8a238948ccecd76209d63f4ae28',
+        endpoint_url = os.environ.get("ENDPOINT_URL"),
+        aws_access_key_id = os.environ.get("ACCESS_KEY_ID"),
+        aws_secret_access_key = os.environ.get("SECRET_ACCESS_KEY"),
         region_name="wnam",
         )
     
     # Upload text file to R2 Object Store
     bucket = s3.Bucket('study-platform')
-    bucket.upload_file('/tmp/upload.txt', f"{user}/txtfiles/{course}/{name}", ExtraArgs={'ContentType': 'text/plain'})
-
+    bucket.upload_file('/tmp/upload.txt', f"{user}/{semester}/txtfiles/{course}/{nametxt}", ExtraArgs={'ContentType': 'text/plain'})
+    bucket.upload_file('/tmp/upload.json', f"{user}/{semester}/jsonfiles/{course}/{namejson}", ExtraArgs={'ContentType': 'application/json'})
+    
     # Delete the big file from R2 Object Store
-    bucket.Object(f"{'/'.join(fileName.split('/')[2:])}").delete()
+    #bucket.Object(f"{'/'.join(fileName.split('/')[2:])}").delete()
 
     # Read markdown from file
     with open('/tmp/upload.txt', 'r') as file:
@@ -65,6 +81,10 @@ def lambda_handler(event, context=None):
 
     # Split
     splits = text_splitter.split_documents(md_header_splits)
+    # print(type(splits))
+    # print(len(splits))
+    # print(splits)
+    # return
     context = ''
     for i, doc in enumerate(splits):
         context += f'[PageTitle: {doc.metadata}\nPageContent: {doc.page_content}]\n\n'
@@ -105,7 +125,7 @@ def lambda_handler(event, context=None):
         "response_type": "no_answer",
         "response_code": "404",
         "ranked_topics_w_subtopics": [
-            "Text is too vague or unclear to extract meaningful topics"
+            "Text is too vague or unclear to extract meaningful information"
         ]
     }
 
@@ -174,7 +194,7 @@ def lambda_handler(event, context=None):
             "response_type": "no_answer",
             "response_code": "404",
             "ranked_topics_w_subtopics": [
-                "Text is too vague or unclear to extract meaningful topics"
+                "Text is too vague or unclear to extract meaningful information"
             ]
         }
         return response
@@ -187,7 +207,38 @@ def lambda_handler(event, context=None):
             "ranked_topics_w_subtopics": output.parsed.ranked_topics_w_subtopics
         }
         print(json.dumps(response, indent=2))
-        return response
+    
+
+    docs_added = 0
+    total_docs = len(splits)
+    for i, doc in enumerate(splits, 1):
+        # Get title from metadata
+        title = '|'.join(doc.metadata.values())
+
+        url = f"https://api.vectorsadd.sayman.me/{user}/{semester}/{course}/{name}/{i}"
+
+        payload = {
+            "title": title,
+            "text": doc.page_content
+        }
+
+        try:
+            responseadd = requests.post(url, json=payload)
+            responseadd.raise_for_status()
+
+            result = responseadd.json()
+            print(f"Successfully added document: {result}")
+            docs_added += 1
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to add document: {e}")
+            continue
+    
+    response.update({
+        "docs_added": docs_added,
+        "total_docs": total_docs,
+        "all_docs_added": docs_added == total_docs
+    })
+    return response
 
     '''
     Output Parsed:
@@ -232,4 +283,4 @@ def parse_llm_response(llm_response):
 
 
 
-#lambda_handler({'fileName': 'study/extract/user_2pzyMr9cn5Ji6agyboLqeYfzQkL/bigfiles/41437548-ea2c-4d69-ae81-6474bb469139/file2.pdf'}, None)
+#lambda_handler({'fileName': 'study/extract/user_2qecf04Tg3QKPPl7rfjf8hWosLr/Fall2024/bigfiles/3387612d-0b06-4720-9ae7-30ce1b620833/file1.pdf'}, None)
