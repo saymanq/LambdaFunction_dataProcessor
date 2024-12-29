@@ -5,9 +5,34 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel
 from openai import OpenAI
+import psycopg2
+from psycopg2.extras import execute_batch
 import json
 import re
 import os
+
+def insert_vector_data(vectors_data):
+    """Insert multiple vector records into the vectorData table"""
+    sql = "INSERT INTO vector_data(vector_id, vector_text) VALUES(%s, %s)"
+    
+    try:
+        conn = psycopg2.connect(
+            host=os.environ.get("DB_HOST"),
+            database=os.environ.get("DB_NAME"),
+            user=os.environ.get("DB_USER"),
+            password=os.environ.get("DB_PASSWORD")
+        )
+        
+        with conn.cursor() as cur:
+            execute_batch(cur, sql, vectors_data)
+        conn.commit()
+        
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"Database error: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
 
 def lambda_handler(event, context=None):
     fileName = event['fileName']
@@ -211,6 +236,7 @@ def lambda_handler(event, context=None):
 
     docs_added = 0
     total_docs = len(splits)
+    vectors_data = []
     for i, doc in enumerate(splits, 1):
         # Get title from metadata
         title = '|'.join(doc.metadata.values())
@@ -228,10 +254,16 @@ def lambda_handler(event, context=None):
 
             result = responseadd.json()
             print(f"Successfully added document: {result}")
+
+            vectors_data.append((result['docId'], doc.page_content))
+
             docs_added += 1
         except requests.exceptions.RequestException as e:
             print(f"Failed to add document: {e}")
             continue
+    
+    if vectors_data:
+        insert_vector_data(vectors_data)
     
     response.update({
         "docs_added": docs_added,

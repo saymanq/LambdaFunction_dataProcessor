@@ -2,11 +2,11 @@ orjson-3.10.12.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNu
 orjson-3.10.12.dist-info/METADATA,sha256=I5SqUw3pOyoqBqpLh6pq4Sx9mRh4fXrnmzHBeKT45r4,41792
 orjson-3.10.12.dist-info/RECORD,,
 orjson-3.10.12.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
-orjson-3.10.12.dist-info/WHEEL,sha256=RxcIwzHiKGU-6Pzw4LFcqEyEyJSRR8POicVfJ5L-7To,131
+orjson-3.10.12.dist-info/WHEEL,sha256=Bw7l6HJaf0x24Gj27ETADBwiLo-kDlWfj4vLwvdiX7k,148
 orjson-3.10.12.dist-info/licenses/LICENSE-APACHE,sha256=pg7qgXUUUxZo1-AHZXMUSf4U0FnTJJ4LyTs23kX3WfI,10847
 orjson-3.10.12.dist-info/licenses/LICENSE-MIT,sha256=I_GOA9xJ35FiL-KnYXZJdATkbO2KcV2dK2enRGVxzKM,1023
 orjson/__init__.py,sha256=1SdrKCoU_OHDXXY54LqX9Q-12MjiMWic3r52Cp_CYXA,589
 orjson/__init__.pyi,sha256=z1Mm1FjuLWrnyY028gsq3KY_bhSu3tZT75F0JZqN2-o,761
 orjson/__pycache__/__init__.cpython-313.pyc,,
-orjson/orjson.cpython-313-aarch64-linux-gnu.so,sha256=LTXkbZ6lgiXh5IlRTEGUePoiUWUAB13uOzUl8fg-Pp4,218680
+orjson/orjson.cpython-313-darwin.so,sha256=gPldqWnPUYPJBn55BzU_359HPHSwioSJ6Xzg9eCVXJc,548320
 orjson/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
