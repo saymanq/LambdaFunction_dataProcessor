@@ -35,7 +35,13 @@ def insert_vector_data(vectors_data):
 
 
 def lambda_handler(event, context=None):
-    fileName = event['fileName']
+    if isinstance(event.get('body'), str):
+        body = json.loads(event['body'])
+    else:
+        body = event.get('body', {})
+    
+    
+    fileName = body.get('fileName')
     user, semester, location, course, name = fileName.split('/')[2:]
     if '.' in name:
         nametxt = name.split('.')[0] + '.txt'
