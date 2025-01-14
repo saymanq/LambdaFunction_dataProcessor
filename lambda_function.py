@@ -33,6 +33,32 @@ def insert_vector_data(vectors_data):
         if conn is not None:
             conn.close()
 
+def insert_pagewise_data(user_id, course_id, file_r2_name, semester, summaries):
+    """Insert pagewise summary data into the course_files_summary table"""
+    sql = """
+    INSERT INTO course_files_summary 
+    (clerk_user_id, course_id, file_r2_name, semester, file_summary)
+    VALUES (%s, %s, %s, %s, %s)
+    """
+    
+    try:
+        conn = psycopg2.connect(
+            host=os.environ.get("DB_HOST"),
+            database=os.environ.get("DB_NAME"),
+            user=os.environ.get("DB_USER"),
+            password=os.environ.get("DB_PASSWORD")
+        )
+        
+        with conn.cursor() as cur:
+            cur.execute(sql, (user_id, course_id, file_r2_name, semester, json.dumps(summaries)))
+        conn.commit()
+        
+    except (Exception, psycopg2.DatabaseError) as error:
+        print(f"Database error: {error}")
+    finally:
+        if conn is not None:
+            conn.close()
+
 
 def lambda_handler(event, context=None):
     if isinstance(event.get('body'), str):
@@ -58,15 +84,17 @@ def lambda_handler(event, context=None):
             "response_type": "no_data",
             "response_code": "404",
             "ranked_topics_w_subtopics": [
-                "Nothing"
+                "Data cannot be parsed from the document"
             ]
         }
         return responsult
 
+    pagesText = []
     # Create a text file and write the data to it
     with open('/tmp/upload.txt', 'w') as txt_file:
         for doc in docs:
             markdown_text = doc['text']
+            pagesText.append(markdown_text)
             txt_file.write(markdown_text + '\n\n')
 
     # First write the JSON data to a temporary file
@@ -133,11 +161,13 @@ def lambda_handler(event, context=None):
     - For highly technical or dense text, prioritize clarity and conciseness in topic names.
     - Ensure the Output Is Clear. Avoid redundancy or overly verbose topic names.
     - Ensure each topic reflects the content's ideas accurately.
+    - Provide a **short, general overview** of the entire document in 3-4 sentences. This overview should summarize the main purpose of the document and the key ideas it covers. Ensure the summary is comprehensive, straightforward, and captures the essence of the document.
 
     Format the response as a JSON object with exactly these fields:
     - response_type: either 'answer' or 'no_answer'
     - response_code: either '200' or '404'
     - ranked_topics_w_subtopics: an array containing exactly 5 strings (if available), each representing a distinct topic.
+    - summary: a string containing the general overview of the document.
 
     Expected output format:
     {
@@ -149,7 +179,8 @@ def lambda_handler(event, context=None):
             "Topic3",
             "Topic4",
             "Topic5"
-        ]
+        ],
+        "summary": "The document is about..."
     }
     OR
     {
@@ -157,7 +188,8 @@ def lambda_handler(event, context=None):
         "response_code": "404",
         "ranked_topics_w_subtopics": [
             "Text is too vague or unclear to extract meaningful information"
-        ]
+        ],
+        "summary": "The text does not provide enough information for a meaningful summary."
     }
 
     Here is the text you need to analyze:
@@ -206,6 +238,7 @@ def lambda_handler(event, context=None):
         response_type: str
         response_code: str
         ranked_topics_w_subtopics: list[str]
+        summary: str
 
     completion = client.beta.chat.completions.parse(
                     model="gpt-4o-mini",
@@ -226,7 +259,8 @@ def lambda_handler(event, context=None):
             "response_code": "404",
             "ranked_topics_w_subtopics": [
                 "Text is too vague or unclear to extract meaningful information"
-            ]
+            ],
+            "summary": "The text does not provide enough information for a meaningful summary."
         }
         return response
     else:
@@ -276,6 +310,40 @@ def lambda_handler(event, context=None):
         "total_docs": total_docs,
         "all_docs_added": docs_added == total_docs
     })
+
+    # Generate pagewise summaries
+    pagewise_summary = []
+    for text in pagesText:
+        url = "http://api.vectorsquery.sayman.me/llama/summarizefilepage"
+        payload = {
+            "text": text
+        }
+        
+        try:
+            summary_response = requests.post(url, json=payload)
+            summary_response.raise_for_status()
+            summary_text = summary_response.json()
+            pagewise_summary.append({"text": summary_text})
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to get summary: {e}")
+            continue
+
+    # Add pagewise summary to response
+    #response["pagewise_summary"] = pagewise_summary
+
+    # Insert pagewise data into database
+    if pagewise_summary:
+        try:
+            insert_pagewise_data(
+                user_id=user,
+                course_id=course,  # You'll need to get this from somewhere
+                file_r2_name=name,      # This might need to be adjusted to match your UUID format
+                semester=semester,
+                summaries=pagewise_summary
+            )
+        except Exception as e:
+            print(f"Failed to insert pagewise data: {e}")
+
     return response
 
     '''
