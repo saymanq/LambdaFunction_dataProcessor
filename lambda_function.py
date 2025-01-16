@@ -4,9 +4,10 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel
-from openai import OpenAI
+from openai import AzureOpenAI
 import psycopg2
 from psycopg2.extras import execute_batch
+import bisect
 import json
 import re
 import os
@@ -33,12 +34,12 @@ def insert_vector_data(vectors_data):
         if conn is not None:
             conn.close()
 
-def insert_pagewise_data(user_id, course_id, file_r2_name, semester, summaries):
+def insert_pagewise_data(user_id, course_id, file_r2_name, semester, summaries, overall_summary):
     """Insert pagewise summary data into the course_files_summary table"""
     sql = """
     INSERT INTO course_files_summary 
-    (clerk_user_id, course_id, file_r2_name, semester, file_summary)
-    VALUES (%s, %s, %s, %s, %s)
+    (clerk_user_id, course_id, file_r2_name, semester, file_summary, overall_summary)
+    VALUES (%s, %s, %s, %s, %s, %s)
     """
     
     try:
@@ -50,7 +51,7 @@ def insert_pagewise_data(user_id, course_id, file_r2_name, semester, summaries):
         )
         
         with conn.cursor() as cur:
-            cur.execute(sql, (user_id, course_id, file_r2_name, semester, json.dumps(summaries)))
+            cur.execute(sql, (user_id, course_id, file_r2_name, semester, json.dumps(summaries), overall_summary))
         conn.commit()
         
     except (Exception, psycopg2.DatabaseError) as error:
@@ -59,6 +60,16 @@ def insert_pagewise_data(user_id, course_id, file_r2_name, semester, summaries):
         if conn is not None:
             conn.close()
 
+def create_page_mapping(pagesText):
+    """Create a mapping of character positions to page numbers"""
+    page_starts = []  # List to store starting position of each page
+    current_pos = 0
+    
+    for page in pagesText:
+        page_starts.append(current_pos)
+        current_pos += len(page)
+    
+    return page_starts
 
 def lambda_handler(event, context=None):
     if isinstance(event.get('body'), str):
@@ -230,9 +241,11 @@ def lambda_handler(event, context=None):
     print(parsed_output)
     '''
 
-    client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY")
-    )
+    client = AzureOpenAI(
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT"), 
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),  
+        api_version="2024-10-21"
+        )
 
     class APIResponse(BaseModel):
         response_type: str
@@ -269,7 +282,8 @@ def lambda_handler(event, context=None):
         response = {
             "response_type": output.parsed.response_type,
             "response_code": output.parsed.response_code,
-            "ranked_topics_w_subtopics": output.parsed.ranked_topics_w_subtopics
+            "ranked_topics_w_subtopics": output.parsed.ranked_topics_w_subtopics,
+            "summary": output.parsed.summary
         }
         print(json.dumps(response, indent=2))
     
@@ -277,30 +291,39 @@ def lambda_handler(event, context=None):
     docs_added = 0
     total_docs = len(splits)
     vectors_data = []
+    page_starts = create_page_mapping(pagesText)
+    combined_text = ''.join(pagesText)
     for i, doc in enumerate(splits, 1):
-        # Get title from metadata
-        title = '|'.join(doc.metadata.values())
+        # Find the start position of this chunk in the combined text
+        chunk_start = combined_text.find(doc.page_content)
+        
+        if chunk_start != -1:
+            # Use binary search to find which page this position belongs to
+            page_num = bisect.bisect_right(page_starts, chunk_start) - 1
 
-        url = f"https://api.vectorsadd.sayman.me/{user}/{semester}/{course}/{name}/{i}"
+            # Get title from metadata
+            title = f"Page {page_num + 1}|" + '|'.join(doc.metadata.values())
 
-        payload = {
-            "title": title,
-            "text": doc.page_content
-        }
+            url = f"https://api.vectorsadd.sayman.me/{user}/{semester}/{course}/{name}/{page_num}"
 
-        try:
-            responseadd = requests.post(url, json=payload)
-            responseadd.raise_for_status()
+            payload = {
+                "title": title,
+                "text": doc.page_content
+            }
 
-            result = responseadd.json()
-            print(f"Successfully added document: {result}")
+            try:
+                responseadd = requests.post(url, json=payload)
+                responseadd.raise_for_status()
 
-            vectors_data.append((result['docId'], doc.page_content))
+                result = responseadd.json()
+                print(f"Successfully added document: {result}")
 
-            docs_added += 1
-        except requests.exceptions.RequestException as e:
-            print(f"Failed to add document: {e}")
-            continue
+                vectors_data.append((result['docId'], doc.page_content))
+
+                docs_added += 1
+            except requests.exceptions.RequestException as e:
+                print(f"Failed to add document: {e}")
+                continue
     
     if vectors_data:
         insert_vector_data(vectors_data)
@@ -314,7 +337,7 @@ def lambda_handler(event, context=None):
     # Generate pagewise summaries
     pagewise_summary = []
     for text in pagesText:
-        url = "http://api.vectorsquery.sayman.me/llama/summarizefilepage"
+        url = "https://api.vectorsquery.sayman.me/llama/summarizefilepage"
         payload = {
             "text": text
         }
@@ -339,7 +362,8 @@ def lambda_handler(event, context=None):
                 course_id=course,  # You'll need to get this from somewhere
                 file_r2_name=name,      # This might need to be adjusted to match your UUID format
                 semester=semester,
-                summaries=pagewise_summary
+                summaries=pagewise_summary,
+                overall_summary=output.parsed.summary
             )
         except Exception as e:
             print(f"Failed to insert pagewise data: {e}")
